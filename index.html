@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- CashHub PH v31 — SW fix + @keyframes fix -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -4623,9 +4624,9 @@ function renderPwaSettingsStatus(){
 
 
 <!-- ═══ SERVICE WORKER SOURCE (hidden, read by _registerServiceWorker) ═══ -->
-<!-- type="inert" prevents browser from executing this as JS               -->
-<script id="cashhub-sw-src" type="inert">
-const CACHE_NAME = 'cashhub-v1';
+<!-- type="text/plain" — browser ignores content, JS reads it via textContent -->
+<script id="cashhub-sw-src" type="text/plain">
+const CACHE_NAME = 'cashhub-v31';
 
 self.addEventListener('install', function(e){
   e.waitUntil(
