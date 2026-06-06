@@ -82,16 +82,28 @@ function _injectPwaManifest(){
 
 // ── SERVICE WORKER (inline via blob) ────────────────────────────────────
 function _registerServiceWorker(){
-  if(!('serviceWorker' in navigator)) return;
-  const CACHE='cashhub-v1';
-  const swCode=`
-const CACHE='${''+'cashhub-v1'}';
-self.addEventListener('install',e=>{
-  e.waitUntil(
-    caches.open(CACHE).then(c=>c.addAll(['./',location.href]))
-      .catch(()=>{}) // Ignore if offline at install
-      .then(()=>self.skipWaiting())
-  );
+  if(!('serviceWorker' in navigator)){
+    console.log('[CashHub PWA] SW not supported in this browser');
+    return;
+  }
+  // SW source lives in a hidden <script id="cashhub-sw-src"> tag.
+  // Reading it as textContent sidesteps the blob: URL protocol block.
+  const swSrc = document.getElementById('cashhub-sw-src');
+  if(!swSrc){ console.warn('[CashHub PWA] SW source tag missing'); return; }
+  try{
+    const blob = new Blob([swSrc.textContent], {type:'text/javascript'});
+    const swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl)
+      .then(reg=>{
+        console.log('[CashHub PWA] SW registered');
+        URL.revokeObjectURL(swUrl);
+      })
+      .catch(err=>{
+        console.info('[CashHub PWA] SW unavailable in this context:', err.message);
+      });
+  }catch(e){
+    console.info('[CashHub PWA] SW setup skipped:', e.message);
+  }
 });
 self.addEventListener('activate',e=>{
   e.waitUntil(
@@ -177,6 +189,8 @@ document.addEventListener('DOMContentLoaded',function(){
 .ti-info-circle::before,.ti-circle-check::before,.ti-camera-off::before,.ti-x::before,
 .ti-arrow-right::before,.ti-check::before,.ti-pencil::before{content:none}
 
+/* ── PWA BANNER ANIMATION ── */
+@keyframes slideUpBanner{from{transform:translateY(100%)}to{transform:translateY(0)}}
 /* ════════ RESET & ROOT ════════ */
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
@@ -591,7 +605,7 @@ body.modal-open{overflow:hidden;position:fixed;width:100%}
 </head>
 <body>
 <!-- ═══════════ PWA INSTALL PROMPT ═══════════ -->
-<div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:11000;padding:12px 16px 24px;background:#fff;border-top:1px solid var(--border);box-shadow:0 -4px 20px rgba(0,0,0,0.12);animation:slideUpBanner 0.35s ease">
+<div id="pwa-install-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:11000;padding:12px 16px 24px;background:#fff;border-top:1px solid var(--border);box-shadow:0 -4px 20px rgba(0,0,0,0.12)">
   <div style="display:flex;align-items:center;gap:12px">
     <canvas id="pwa-install-icon" width="48" height="48" style="border-radius:11px;flex-shrink:0"></canvas>
     <div style="flex:1;min-width:0">
@@ -609,7 +623,6 @@ body.modal-open{overflow:hidden;position:fixed;width:100%}
     </button>
   </div>
 </div>
-@keyframes slideUpBanner{from{transform:translateY(100%)}to{transform:translateY(0)}}
 
 <div class="app" id="app">
 <!-- Walkthrough overlay -->
@@ -4539,7 +4552,15 @@ window.addEventListener('appinstalled', function(){
 
 function showInstallBanner(){
   const banner = document.getElementById('pwa-install-banner');
-  if(banner) banner.style.display = 'block';
+  if(!banner) return;
+  banner.style.animation = 'none';
+  banner.style.display = 'block';
+  // Trigger animation after display kicks in
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      banner.style.animation = 'slideUpBanner 0.35s ease forwards';
+    });
+  });
 }
 
 function hideInstallBanner(){
@@ -4600,5 +4621,55 @@ function renderPwaSettingsStatus(){
 }
 </script>
 
+
+<!-- ═══ SERVICE WORKER SOURCE (hidden, read by _registerServiceWorker) ═══ -->
+<!-- type="inert" prevents browser from executing this as JS               -->
+<script id="cashhub-sw-src" type="inert">
+const CACHE_NAME = 'cashhub-v1';
+
+self.addEventListener('install', function(e){
+  e.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(function(cache){
+        return cache.addAll([location.href]).catch(function(){});
+      })
+      .then(function(){ return self.skipWaiting(); })
+  );
+});
+
+self.addEventListener('activate', function(e){
+  e.waitUntil(
+    caches.keys().then(function(keys){
+      return Promise.all(
+        keys.filter(function(k){ return k !== CACHE_NAME; })
+            .map(function(k){ return caches.delete(k); })
+      );
+    }).then(function(){ return self.clients.claim(); })
+  );
+});
+
+self.addEventListener('fetch', function(e){
+  if(e.request.method !== 'GET') return;
+  if(e.request.mode === 'navigate'){
+    e.respondWith(
+      fetch(e.request)
+        .then(function(r){
+          var clone = r.clone();
+          caches.open(CACHE_NAME).then(function(c){ c.put(e.request, clone); });
+          return r;
+        })
+        .catch(function(){
+          return caches.match(e.request).then(function(r){ return r || new Response('Offline', {status:503}); });
+        })
+    );
+  } else {
+    e.respondWith(
+      caches.match(e.request).then(function(r){
+        return r || fetch(e.request).catch(function(){ return new Response('', {status:408}); });
+      })
+    );
+  }
+});
+</script>
 </body>
 </html>
