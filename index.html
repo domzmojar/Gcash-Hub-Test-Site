@@ -1545,6 +1545,18 @@ document.addEventListener('DOMContentLoaded',function(){
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       Export to CSV
     </button>
+    <button class="btn btn-outline btn-sm" onclick="backupJSON()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Backup All Data (JSON)
+    </button>
+    <button class="btn btn-outline btn-sm" onclick="triggerRestore()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Restore from Backup
+    </button>
+    <input type="file" id="restore-file-input" accept="application/json,.json" style="display:none" onchange="handleRestoreFile(event)">
+    <div style="font-size:11px;color:var(--text3);text-align:center;line-height:1.5;padding:2px 0 4px">
+      💾 <strong>Backup</strong> saves everything (transactions, settings, balance) to one file. Keep it safe — restore it anytime or on a new device.
+    </div>
     <button class="btn btn-danger btn-sm" onclick="clearData()">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
       Clear Transactions Only
@@ -1840,7 +1852,16 @@ function saveDB(){
   try{
     normalizeTextOnlyDB();
     localStorage.setItem('cashhub_ph_v3',JSON.stringify(DB));
-  }catch(e){showToast('Storage error: '+e.message);}
+  }catch(e){
+    if(e&&(e.name==='QuotaExceededError'||/quota/i.test(e.message||''))){
+      showToast('⚠ Storage full! Please backup & clear old records.',4000);
+      if(confirm('Device storage is full — your latest change may not be saved!\n\nDownload a backup now to keep your data safe?')){
+        try{backupJSON();}catch(_){}
+      }
+    }else{
+      showToast('Storage error: '+(e&&e.message?e.message:'unknown'));
+    }
+  }
 }
 function saveSetting(k,v){DB.settings[k]=v;saveDB();}
 
@@ -4212,6 +4233,73 @@ function exportCSV(){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='cashhub_export_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
   URL.revokeObjectURL(a.href);
+}
+// ════════════════════════════════════════
+// FULL JSON BACKUP / RESTORE
+// ════════════════════════════════════════
+function backupJSON(){
+  try{
+    normalizeTextOnlyDB();
+    const payload={
+      _app:'CashHubPH',
+      _version:_BUILD_VER,
+      _exportedAt:new Date().toISOString(),
+      data:DB
+    };
+    const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='cashhub_backup_'+new Date().toISOString().slice(0,10)+'.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('Backup downloaded ✓');
+  }catch(e){showToast('Backup failed: '+(e&&e.message?e.message:'unknown'));}
+}
+
+function triggerRestore(){
+  const inp=document.getElementById('restore-file-input');
+  if(inp)inp.click();
+}
+
+function handleRestoreFile(e){
+  const file=e.target.files&&e.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const parsed=JSON.parse(ev.target.result);
+      // Accept either {_app,data:{...}} wrapper OR a raw DB object
+      const incoming=(parsed&&parsed.data)?parsed.data:parsed;
+      if(!incoming||typeof incoming!=='object'||!Array.isArray(incoming.transactions)){
+        throw new Error('Not a valid CashHub backup file');
+      }
+      const txCount=incoming.transactions.length;
+      if(!confirm('Restore this backup?\n\nThis will REPLACE all current data with '+txCount+' transaction(s) from the file.\n\nTip: backup your current data first if unsure.')){
+        return;
+      }
+      DB={
+        ...DEFAULT_DB,
+        ...incoming,
+        transactions:Array.isArray(incoming.transactions)?incoming.transactions:[],
+        deposits:Array.isArray(incoming.deposits)?incoming.deposits:[],
+        balanceOverride:incoming.balanceOverride!==undefined?incoming.balanceOverride:null,
+        balanceOverrideTime:incoming.balanceOverrideTime||null,
+        settings:{...DEFAULT_DB.settings,...(incoming.settings||{})}
+      };
+      saveDB();
+      updateDataSummary();
+      loadSettings();
+      updateGreeting();
+      renderDashboard();
+      renderQrDisplay();
+      showToast('Backup restored ✓ ('+txCount+' transactions)',3500);
+    }catch(err){
+      showToast('Restore failed: '+(err&&err.message?err.message:'invalid file'),4000);
+    }
+  };
+  reader.onerror=()=>showToast('Could not read file.');
+  reader.readAsText(file);
+  e.target.value='';
 }
 function loadSettings(){
   const s=DB.settings;
