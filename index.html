@@ -1835,7 +1835,77 @@ const DEFAULT_DB = {
   }
 };
 let DB = JSON.parse(JSON.stringify(DEFAULT_DB));
-try{const r=localStorage.getItem('cashhub_ph_v3');if(r){const p=JSON.parse(r);DB={...DEFAULT_DB,...p,transactions:Array.isArray(p.transactions)?p.transactions:[],settings:{...DEFAULT_DB.settings,...(p.settings||{})},deposits:p.deposits||[],balanceOverride:p.balanceOverride!==undefined?p.balanceOverride:null,balanceOverrideTime:p.balanceOverrideTime||null}; }}catch(e){}
+
+// ── IndexedDB layer ───────────────────────────────────────────────────────────
+const IDB_NAME    = 'cashhub_ph';
+const IDB_VERSION = 2;
+const IDB_STORE   = 'kv';
+const IDB_KEY     = 'cashhub_ph_v3';
+let   _idb        = null; // opened IDBDatabase instance
+
+function _openIDB(){
+  return new Promise((resolve, reject)=>{
+    if(_idb){ resolve(_idb); return; }
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = e=>{
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(IDB_STORE))
+        db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = e=>{ _idb = e.target.result; resolve(_idb); };
+    req.onerror   = e=>reject(e.target.error);
+    req.onblocked = ()=>reject(new Error('IDB open blocked — close other tabs'));
+  });
+}
+
+function _idbGet(key){
+  return _openIDB().then(db=>new Promise((resolve, reject)=>{
+    const tx  = db.transaction(IDB_STORE,'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = e=>resolve(e.target.result);
+    req.onerror   = e=>reject(e.target.error);
+  }));
+}
+
+function _idbSet(key, value){
+  return _openIDB().then(db=>new Promise((resolve, reject)=>{
+    const tx  = db.transaction(IDB_STORE,'readwrite');
+    const req = tx.objectStore(IDB_STORE).put(value, key);
+    req.onsuccess = ()=>resolve();
+    req.onerror   = e=>reject(e.target.error);
+  }));
+}
+
+// Migrate any existing localStorage data into IndexedDB, then remove it.
+async function _migrateFromLocalStorage(){
+  try{
+    const old = localStorage.getItem(IDB_KEY);
+    if(old){
+      await _idbSet(IDB_KEY, old);
+      localStorage.removeItem(IDB_KEY);
+    }
+  }catch(_){}
+}
+
+// Load DB from IndexedDB (async). Falls back to DEFAULT_DB on error.
+async function loadDB(){
+  try{
+    await _migrateFromLocalStorage();
+    const raw = await _idbGet(IDB_KEY);
+    if(raw){
+      const p = JSON.parse(raw);
+      DB = {
+        ...DEFAULT_DB, ...p,
+        transactions : Array.isArray(p.transactions) ? p.transactions : [],
+        settings     : { ...DEFAULT_DB.settings, ...(p.settings||{}) },
+        deposits     : p.deposits || [],
+        balanceOverride     : p.balanceOverride !== undefined ? p.balanceOverride : null,
+        balanceOverrideTime : p.balanceOverrideTime || null
+      };
+    }
+  }catch(e){ console.warn('[CashHub] loadDB error:', e); }
+}
+
 function normalizeTextOnlyDB(){
   if(!Array.isArray(DB.transactions))DB.transactions=[];
   DB.transactions=DB.transactions.map(t=>{
@@ -1848,20 +1918,12 @@ function normalizeTextOnlyDB(){
     delete DB.settings.requireSig;
   }
 }
+
 function saveDB(){
-  try{
-    normalizeTextOnlyDB();
-    localStorage.setItem('cashhub_ph_v3',JSON.stringify(DB));
-  }catch(e){
-    if(e&&(e.name==='QuotaExceededError'||/quota/i.test(e.message||''))){
-      showToast('⚠ Storage full! Please backup & clear old records.',4000);
-      if(confirm('Device storage is full — your latest change may not be saved!\n\nDownload a backup now to keep your data safe?')){
-        try{backupJSON();}catch(_){}
-      }
-    }else{
-      showToast('Storage error: '+(e&&e.message?e.message:'unknown'));
-    }
-  }
+  normalizeTextOnlyDB();
+  _idbSet(IDB_KEY, JSON.stringify(DB)).catch(e=>{
+    showToast('Storage error: '+(e&&e.message?e.message:'unknown'));
+  });
 }
 function saveSetting(k,v){DB.settings[k]=v;saveDB();}
 
@@ -1899,9 +1961,9 @@ function showToast(msg,dur=2800){const t=document.getElementById('toast');t.text
 // ════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════
-document.addEventListener('DOMContentLoaded',()=>{
+document.addEventListener('DOMContentLoaded',async ()=>{
+  await loadDB();
   normalizeTextOnlyDB();
-  saveDB();
   updateGreeting();
   loadSettings();
   setInterval(updateGreeting,60000);
