@@ -1,4 +1,4 @@
-// Cache version is stamped automatically by build.js on every Vercel deploy
+// Cache version is stamped automatically by build.js on every Vercel deploy — v2
 var CACHE = 'cashhub-mqdok3fzth38';
 
 self.addEventListener('install', function(e){
