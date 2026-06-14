@@ -1805,7 +1805,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
 <script>
 'use strict';
-const _BUILD_VER = 'cashhub-mqdok3fzth38'; // auto-updated each save — drives SW cache version
+const _BUILD_VER = 'cashhub-mqdpf79wkzzv'; // auto-updated each save — drives SW cache version
 // ════════════════════════════════════════
 // TRIAL SYSTEM — Self-Modifying License
 // ════════════════════════════════════════
@@ -5029,6 +5029,14 @@ self.addEventListener('fetch', function(e){
 // ── PWA UPDATE LISTENER ─────────────────────────────────────────────────
 // When the SW activates a new version, it messages all open tabs
 if('serviceWorker' in navigator){
+  // Check for SW updates every 30 minutes — ensures users get notified
+  // without needing to close and reopen the app
+  setInterval(function(){
+    navigator.serviceWorker.getRegistration().then(function(reg){
+      if(reg) reg.update();
+    });
+  }, 30 * 60 * 1000);
+
   navigator.serviceWorker.addEventListener('message', function(e){
     if(e.data && e.data.type === 'SW_UPDATED'){
       // Show a non-intrusive update toast after 1.5s
