@@ -531,15 +531,21 @@ function _injectManifest(){
 }
 function _registerSW(){
   if(!('serviceWorker' in navigator))return;
-  var t=document.getElementById('cashhub-sw');
-  if(!t){console.warn('[PWA] SW source tag missing');return;}
-  try{
-    var blob=new Blob([t.textContent],{type:'text/javascript'});
-    var url=URL.createObjectURL(blob);
-    navigator.serviceWorker.register(url)
-      .then(function(r){console.log('[PWA] SW registered');URL.revokeObjectURL(url);})
-      .catch(function(e){console.info('[PWA] SW skipped:',e.message);});
-  }catch(e){console.info('[PWA] SW error:',e.message);}
+  navigator.serviceWorker.register('/sw.js')
+    .then(function(r){
+      console.log('[PWA] SW registered via /sw.js');
+      // Listen for a new SW waiting to activate
+      r.addEventListener('updatefound', function(){
+        var newSW = r.installing;
+        newSW.addEventListener('statechange', function(){
+          if(newSW.state === 'installed' && navigator.serviceWorker.controller){
+            // New version ready — SW activate will message the tab
+            console.log('[PWA] New SW installed, waiting to activate');
+          }
+        });
+      });
+    })
+    .catch(function(e){ console.info('[PWA] SW skipped:', e.message); });
 }
 function _backTrap(){
   if(!window.history||!window.history.pushState)return;
@@ -1799,7 +1805,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
 <script>
 'use strict';
-const _BUILD_VER = 'cashhub-mqdjdp8nvrx8'; // auto-updated each save — drives SW cache version
+const _BUILD_VER = 'cashhub-mqdok3fzth38'; // auto-updated each save — drives SW cache version
 // ════════════════════════════════════════
 // TRIAL SYSTEM — Self-Modifying License
 // ════════════════════════════════════════
